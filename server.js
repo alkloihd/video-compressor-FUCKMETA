@@ -1,0 +1,299 @@
+import express from 'express';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
+import { fileURLToPath } from 'url';
+import { dirname, join, basename, extname } from 'path';
+import { existsSync, createReadStream, statSync, renameSync } from 'fs';
+import { mkdir, stat } from 'fs/promises';
+import { tmpdir } from 'os';
+import multer from 'multer';
+import { detectHWAccel } from './lib/hwaccel.js';
+import { probe } from './lib/probe.js';
+import { buildCommand } from './lib/ffmpeg.js';
+import { JobQueue } from './lib/jobQueue.js';
+import { spawn } from 'child_process';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const app = express();
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
+const PORT = process.env.PORT || 3000;
+const UPLOAD_DIR = join(tmpdir(), 'video-compressor-uploads');
+const FFMPEG_PATH = '/opt/homebrew/bin/ffmpeg';
+
+await mkdir(UPLOAD_DIR, { recursive: true });
+
+// Multer for file uploads
+const upload = multer({
+  dest: UPLOAD_DIR,
+  limits: { fileSize: 50 * 1024 * 1024 * 1024 }, // 50GB
+});
+
+// Detect hardware acceleration on startup
+let hwaccelCapabilities = null;
+try {
+  hwaccelCapabilities = await detectHWAccel();
+  console.log('Hardware acceleration:', hwaccelCapabilities);
+} catch (err) {
+  console.warn('HW accel detection failed:', err.message);
+  hwaccelCapabilities = Object.freeze({
+    h264_videotoolbox: false,
+    hevc_videotoolbox: false,
+    prores_videotoolbox: false,
+  });
+}
+
+const jobQueue = new JobQueue();
+const wsClients = new Set();
+
+wss.on('connection', (ws) => {
+  wsClients.add(ws);
+  ws.on('close', () => wsClients.delete(ws));
+  ws.on('error', () => wsClients.delete(ws));
+});
+
+function broadcast(data) {
+  const msg = JSON.stringify(data);
+  for (const client of wsClients) {
+    if (client.readyState === 1) client.send(msg);
+  }
+}
+
+jobQueue.on('progress', (data) => broadcast({ type: 'progress', jobId: data.id, ...data }));
+jobQueue.on('complete', (data) =>
+  broadcast({ type: 'complete', jobId: data.id, outputSize: data.compressedSize, ...data }),
+);
+jobQueue.on('error', (data) =>
+  broadcast({ type: 'error', jobId: data.id, error: data.message, ...data }),
+);
+
+app.use(express.json({ limit: '1mb' }));
+app.use(express.static(join(__dirname, 'public')));
+
+// Upload files
+app.post('/api/upload', upload.array('file', 20), (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded' });
+  }
+  const results = req.files.map((f) => {
+    // Rename to include original extension
+    const ext = extname(f.originalname) || '.mp4';
+    const newPath = f.path + ext;
+    try {
+      renameSync(f.path, newPath);
+    } catch {}
+    return { path: newPath, name: f.originalname, size: f.size };
+  });
+  res.json({ files: results });
+});
+
+// Probe
+app.get('/api/probe', async (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) return res.status(400).json({ error: "Query parameter 'path' is required" });
+  if (!existsSync(filePath)) return res.status(404).json({ error: `File not found: ${filePath}` });
+  try {
+    const metadata = await probe(filePath);
+    res.json(metadata);
+  } catch (err) {
+    res.status(500).json({ error: `Failed to probe: ${err.message}` });
+  }
+});
+
+// Stream video
+app.get('/api/stream', (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+
+  const fileStat = statSync(filePath);
+  const fileSize = fileStat.size;
+  const range = req.headers.range;
+  const ext = extname(filePath).toLowerCase();
+  const mimeTypes = {
+    '.mp4': 'video/mp4',
+    '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska',
+    '.webm': 'video/webm',
+    '.avi': 'video/x-msvideo',
+    '.wmv': 'video/x-ms-wmv',
+    '.flv': 'video/x-flv',
+    '.ts': 'video/mp2t',
+    '.m4v': 'video/mp4',
+    '.mts': 'video/mp2t',
+  };
+  const contentType = mimeTypes[ext] || 'video/mp4';
+
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+      'Content-Type': contentType,
+    });
+    createReadStream(filePath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, { 'Content-Length': fileSize, 'Content-Type': contentType });
+    createReadStream(filePath).pipe(res);
+  }
+});
+
+// Thumbnail
+app.get('/api/thumbnail', (req, res) => {
+  const filePath = req.query.path;
+  const time = req.query.time || '00:00:02';
+  const width = parseInt(req.query.width) || 320;
+  if (!filePath) return res.status(400).json({ error: "Query parameter 'path' is required" });
+  if (!existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+
+  const proc = spawn(
+    FFMPEG_PATH,
+    [
+      '-ss',
+      String(time),
+      '-i',
+      filePath,
+      '-vframes',
+      '1',
+      '-vf',
+      `scale=${width}:-1`,
+      '-f',
+      'image2',
+      '-c:v',
+      'mjpeg',
+      '-q:v',
+      '5',
+      'pipe:1',
+    ],
+    { stdio: ['ignore', 'pipe', 'ignore'] },
+  );
+
+  const chunks = [];
+  proc.stdout.on('data', (chunk) => chunks.push(chunk));
+  proc.on('close', (code) => {
+    if (code !== 0 || chunks.length === 0)
+      return res.status(500).json({ error: 'Thumbnail generation failed' });
+    const buffer = Buffer.concat(chunks);
+    res.writeHead(200, {
+      'Content-Type': 'image/jpeg',
+      'Content-Length': buffer.length,
+      'Cache-Control': 'public, max-age=3600',
+    });
+    res.end(buffer);
+  });
+});
+
+// Compress
+app.post('/api/compress', async (req, res) => {
+  const { files, preset, codec, format, trim, crop, scale, crf, speed } = req.body;
+  if (!files || !Array.isArray(files) || files.length === 0)
+    return res.status(400).json({ error: 'Missing required field: files' });
+  if (!preset) return res.status(400).json({ error: 'Missing required field: preset' });
+  if (!codec) return res.status(400).json({ error: 'Missing required field: codec' });
+  if (!format) return res.status(400).json({ error: 'Missing required field: format' });
+
+  const jobs = [];
+  for (const file of files) {
+    const inputPath = file.path;
+    if (!existsSync(inputPath))
+      return res.status(404).json({ error: `File not found: ${inputPath}` });
+
+    const inputDir = dirname(inputPath);
+    const inputName = basename(inputPath, extname(inputPath));
+    const outputExt = format === 'mkv' ? '.mkv' : format === 'mov' ? '.mov' : '.mp4';
+    let outputName = `${inputName}_COMP${outputExt}`;
+    let outputPath = join(inputDir, outputName);
+    let counter = 2;
+    while (existsSync(outputPath)) {
+      outputName = `${inputName}_COMP_${counter}${outputExt}`;
+      outputPath = join(inputDir, outputName);
+      counter++;
+    }
+
+    let metadata;
+    try {
+      metadata = await probe(inputPath);
+    } catch (err) {
+      return res.status(500).json({ error: `Failed to probe: ${inputPath}: ${err.message}` });
+    }
+
+    const ffmpegArgs = buildCommand({
+      inputPath,
+      outputPath,
+      preset,
+      codec,
+      format,
+      hwAccel: hwaccelCapabilities,
+      trim: trim || null,
+      crop: crop || null,
+      scale: scale || 'original',
+      sourceBitrate: metadata.bitrate || 0,
+      crf: crf !== undefined ? crf : null,
+      speed: speed || null,
+    });
+    const fileStat = await stat(inputPath);
+
+    const job = jobQueue.addJob({
+      inputPath,
+      outputPath,
+      preset,
+      codec,
+      format,
+      ffmpegArgs,
+      duration: metadata.duration,
+      originalSize: fileStat.size,
+    });
+
+    jobs.push({
+      id: job.id,
+      status: job.status,
+      inputPath,
+      outputPath,
+      fileName: file.name || basename(inputPath),
+    });
+  }
+  res.json({ jobs });
+});
+
+app.get('/api/jobs', (req, res) => {
+  res.json({ jobs: jobQueue.getJobs() });
+});
+
+app.delete('/api/jobs/:id', (req, res) => {
+  const { id } = req.params;
+  const job = jobQueue.getJob(id);
+  if (!job) return res.status(404).json({ error: `Job not found: ${id}` });
+  if (job.status === 'complete') return res.status(409).json({ error: 'Job already completed' });
+  const cancelled = jobQueue.cancelJob(id);
+  res.json({ cancelled, id });
+});
+
+app.get('/api/hwaccel', (req, res) => {
+  res.json(hwaccelCapabilities);
+});
+
+function shutdown() {
+  console.log('\nShutting down...');
+  for (const client of wsClients) client.close();
+  server.close(() => {
+    console.log('Server closed.');
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 5000);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+server.listen(PORT, () => {
+  console.log(`\n  Video Compressor ready at http://localhost:${PORT}\n`);
+  console.log(
+    `  Hardware acceleration: ${hwaccelCapabilities.h264_videotoolbox ? 'VideoToolbox' : 'Software only'}`,
+  );
+  console.log(`  FFmpeg: ${FFMPEG_PATH}`);
+  console.log(`  Upload dir: ${UPLOAD_DIR}\n`);
+});

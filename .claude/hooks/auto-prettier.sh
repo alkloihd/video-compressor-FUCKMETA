@@ -1,0 +1,10 @@
+#!/bin/bash
+# PostToolUse hook: Auto-format with Prettier after file edits
+# Matcher: Edit|Write
+
+input=$(cat)
+file=$(echo "$input" | jq -r '.tool_input.file_path // empty')
+
+if [[ "$file" =~ \.(js|css|html|json)$ ]] && [[ -f "$file" ]]; then
+  cd "/Users/rishaal/CODING/CODED TOOLS/VIDEO COMPRESSOR" && npx prettier --write "$file" 2>/dev/null
+fi
