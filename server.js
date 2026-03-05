@@ -73,7 +73,13 @@ wss.on('connection', (ws) => {
 function broadcast(data) {
   const msg = JSON.stringify(data);
   for (const client of wsClients) {
-    if (client.readyState === 1) client.send(msg);
+    if (client.readyState === 1) {
+      try {
+        client.send(msg);
+      } catch (_) {
+        /* client disconnected */
+      }
+    }
   }
 }
 
@@ -216,6 +222,13 @@ app.post('/api/compress', async (req, res) => {
   if (!codec) return res.status(400).json({ error: 'Missing required field: codec' });
   if (!format) return res.status(400).json({ error: 'Missing required field: format' });
 
+  // Validate all paths before processing
+  for (const file of files) {
+    if (!isSafePath(file.path)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+
   const jobs = [];
   for (const file of files) {
     const inputPath = file.path;
@@ -332,6 +345,10 @@ app.post('/api/metaclean', async (req, res) => {
 
   for (const file of files) {
     const filePath = file.path;
+    if (!isSafePath(filePath)) {
+      results.push({ path: filePath, error: 'Access denied', success: false });
+      continue;
+    }
     if (!existsSync(filePath)) {
       results.push({ path: filePath, error: 'File not found', success: false });
       continue;
@@ -373,6 +390,7 @@ app.post('/api/metaclean', async (req, res) => {
         outputPath,
         removedCount: report.removedCount,
         removed: report.removed,
+        preserved: report.preserved,
         preservedCount: report.preservedCount,
       });
 
@@ -411,6 +429,10 @@ app.get('/api/stitch/probe', async (req, res) => {
     return res.status(400).json({ error: 'At least 2 clip paths are required' });
   }
 
+  for (const p of clipPaths) {
+    if (!isSafePath(p)) return res.status(403).json({ error: 'Access denied' });
+  }
+
   const clips = clipPaths.map((path) => ({ path, name: basename(path) }));
 
   try {
@@ -428,10 +450,13 @@ app.post('/api/stitch', async (req, res) => {
     return res.status(400).json({ error: 'At least 2 clips are required' });
   }
 
-  // Validate all clip files exist
+  // Validate all clip paths are safe and exist
   for (const clip of clips) {
-    if (!clip.path || !existsSync(clip.path)) {
-      return res.status(404).json({ error: `Clip not found: ${clip.path || 'no path'}` });
+    if (!clip.path || !isSafePath(clip.path)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!existsSync(clip.path)) {
+      return res.status(404).json({ error: `Clip not found: ${clip.path}` });
     }
   }
 

@@ -169,14 +169,57 @@ function renderMetaFiles() {
       let resultHTML = '';
       if (f.result && f.status === 'done') {
         const removed = f.result.removed || [];
-        const preserved = f.result.preserved || f.result.preservedCount || 0;
+        const preserved = f.result.preserved || [];
+        const preservedCount = Array.isArray(preserved)
+          ? preserved.length
+          : f.result.preservedCount || 0;
+
+        const removedId = `removed-${f.id}`;
+        const preservedId = `preserved-${f.id}`;
+
         resultHTML = `
         <div style="margin-top: 8px; padding: 8px; background: var(--bg-elevated); border: 2px solid var(--glass-border); border-radius: 4px; font-size: 12px;">
-          <div style="color: var(--accent-primary, var(--accent)); font-weight: 700; font-family: 'SF Mono', monospace; text-transform: uppercase; font-size: 11px; margin-bottom: 4px;">
-            ${removed.length} tag${removed.length !== 1 ? 's' : ''} removed | ${preserved} preserved
+          <div style="display: flex; gap: 12px; margin-bottom: 6px;">
+            <button data-toggle="${removedId}" style="cursor: pointer; background: none; border: 2px solid var(--status-error-border); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 700; font-family: 'SF Mono', monospace; text-transform: uppercase; color: var(--status-error-text); letter-spacing: 0.03em;">
+              <span data-caret="${removedId}">\u25B6</span> ${removed.length} removed
+            </button>
+            <button data-toggle="${preservedId}" style="cursor: pointer; background: none; border: 2px solid var(--accent-border-25, var(--glass-border)); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 700; font-family: 'SF Mono', monospace; text-transform: uppercase; color: var(--accent-primary, var(--accent)); letter-spacing: 0.03em;">
+              <span data-caret="${preservedId}">\u25B6</span> ${preservedCount} preserved
+            </button>
           </div>
-          ${removed.map((r) => `<div style="color: var(--text-muted); font-size: 11px;">\u2022 ${r.tag}: <span style="color: var(--status-error-text); text-decoration: line-through;">${String(r.oldValue).substring(0, 60)}</span></div>`).join('')}
-          ${f.result.outputPath ? `<a href="/api/download?path=${encodeURIComponent(f.result.outputPath)}" style="display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-bg-10); border: 2px solid var(--accent-border-25); border-radius: 4px; text-decoration: none; font-family: 'SF Mono', monospace; text-transform: uppercase; letter-spacing: 0.05em;">Download Clean</a>` : ''}
+          <div id="${removedId}" style="display: none; margin-bottom: 6px; padding: 6px; background: var(--bg-surface); border: 1px solid var(--glass-border); border-radius: 3px; max-height: 200px; overflow-y: auto;">
+            ${
+              removed.length === 0
+                ? '<div style="color: var(--text-muted); font-size: 11px; font-style: italic;">No tags removed</div>'
+                : removed
+                    .map(
+                      (
+                        r,
+                      ) => `<div style="display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; font-size: 11px; border-bottom: 1px solid var(--glass-border);">
+              <span style="color: var(--text-secondary); font-family: 'SF Mono', monospace; white-space: nowrap;">${r.group}:${r.tag}</span>
+              <span style="color: var(--status-error-text); text-decoration: line-through; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${String(r.oldValue).substring(0, 60)}</span>
+            </div>`,
+                    )
+                    .join('')
+            }
+          </div>
+          <div id="${preservedId}" style="display: none; margin-bottom: 6px; padding: 6px; background: var(--bg-surface); border: 1px solid var(--glass-border); border-radius: 3px; max-height: 200px; overflow-y: auto;">
+            ${
+              !Array.isArray(preserved) || preserved.length === 0
+                ? `<div style="color: var(--text-muted); font-size: 11px; font-style: italic;">${preservedCount} tags preserved (details not available)</div>`
+                : preserved
+                    .map(
+                      (
+                        p,
+                      ) => `<div style="display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; font-size: 11px; border-bottom: 1px solid var(--glass-border);">
+              <span style="color: var(--text-secondary); font-family: 'SF Mono', monospace; white-space: nowrap;">${p.group}:${p.tag}</span>
+              <span style="color: var(--accent-primary, var(--accent)); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.value}</span>
+            </div>`,
+                    )
+                    .join('')
+            }
+          </div>
+          ${f.result.outputPath ? `<a href="/api/download?path=${encodeURIComponent(f.result.outputPath)}" style="display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; padding: 4px 10px; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-bg-10); border: 2px solid var(--accent-border-25); border-radius: 4px; text-decoration: none; font-family: 'SF Mono', monospace; text-transform: uppercase; letter-spacing: 0.05em;">Download Clean</a>` : ''}
         </div>
       `;
       }
@@ -206,6 +249,21 @@ function renderMetaFiles() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       removeMetaFile(btn.dataset.metaRemove);
+    });
+  });
+
+  // Wire expand/collapse toggle buttons
+  container.querySelectorAll('[data-toggle]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const targetId = btn.dataset.toggle;
+      const target = document.getElementById(targetId);
+      const caret = btn.querySelector(`[data-caret="${targetId}"]`);
+      if (target) {
+        const isOpen = target.style.display !== 'none';
+        target.style.display = isOpen ? 'none' : 'block';
+        if (caret) caret.textContent = isOpen ? '\u25B6' : '\u25BC';
+      }
     });
   });
 }

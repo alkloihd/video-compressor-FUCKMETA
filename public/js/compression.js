@@ -193,14 +193,14 @@ function createResolutionSelector() {
   card.id = 'resolution-section';
 
   const heading = document.createElement('h3');
-  heading.className = 'text-sm font-semibold text-gray-300 uppercase tracking-wider';
+  heading.className = 'text-sm font-semibold themed-heading uppercase tracking-wider';
   heading.textContent = 'Resolution';
   card.appendChild(heading);
 
   const select = document.createElement('select');
   select.id = 'resolution-select';
   select.className =
-    'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all appearance-none cursor-pointer';
+    'w-full themed-input border rounded px-3 py-2.5 text-sm focus:outline-none transition-all appearance-none cursor-pointer';
 
   const options = [
     { value: 'original', label: 'Original' },
@@ -271,7 +271,7 @@ function createEstimationDisplay() {
 
   const estimateEl = document.createElement('div');
   estimateEl.id = 'size-estimation';
-  estimateEl.className = 'text-center text-sm text-gray-400 py-1';
+  estimateEl.className = 'text-center text-sm themed-text-muted py-1';
   estimateEl.textContent = '';
 
   // Insert after compression-summary
@@ -423,11 +423,11 @@ export function updateEstimation() {
 
   // Color based on savings
   if (pctChange <= -20) {
-    estimateEl.style.color = '#4ade80'; // green
+    estimateEl.style.color = 'var(--accent-primary)';
   } else if (pctChange <= 0) {
-    estimateEl.style.color = '#a3a3a3'; // neutral gray
+    estimateEl.style.color = 'var(--text-tertiary)';
   } else {
-    estimateEl.style.color = '#fb923c'; // orange/warning
+    estimateEl.style.color = 'var(--accent-warning)';
   }
 }
 
