@@ -113,14 +113,11 @@ function updateHWBadge() {
     return;
   }
 
-  const hwAccels = [];
-  if (hwInfo.videotoolbox) hwAccels.push('VideoToolbox');
-  if (hwInfo.nvenc) hwAccels.push('NVENC');
-  if (hwInfo.qsv) hwAccels.push('QSV');
-  if (hwInfo.amf) hwAccels.push('AMF');
+  const hasVideoToolbox =
+    hwInfo.h264_videotoolbox || hwInfo.hevc_videotoolbox || hwInfo.prores_videotoolbox;
 
-  if (hwAccels.length > 0) {
-    badgeText.textContent = `HW Accel: ${hwAccels.join(', ')}`;
+  if (hasVideoToolbox) {
+    badgeText.textContent = 'HW Accel: VideoToolbox';
     badge.classList.add('hw-available');
     badge.classList.remove('hw-unavailable');
   } else {
@@ -136,7 +133,6 @@ function updateHWIndicators() {
 
   const buttons = codecContainer.querySelectorAll('.preset-btn');
   buttons.forEach((btn) => {
-    // Remove existing indicators
     const existing = btn.querySelector('.hw-indicator');
     if (existing) existing.remove();
 
@@ -144,10 +140,10 @@ function updateHWIndicators() {
     if (!codec) return;
 
     let hasHW = false;
-    if (codec === 'h264' && (hwInfo.videotoolbox || hwInfo.nvenc || hwInfo.qsv)) hasHW = true;
-    if (codec === 'h265' && (hwInfo.videotoolbox || hwInfo.nvenc || hwInfo.qsv)) hasHW = true;
-    if (codec === 'av1' && (hwInfo.videotoolbox || hwInfo.nvenc)) hasHW = true;
-    if (codec === 'prores' && hwInfo.videotoolbox) hasHW = true;
+    if (codec === 'h264') hasHW = !!hwInfo.h264_videotoolbox;
+    if (codec === 'h265') hasHW = !!hwInfo.hevc_videotoolbox;
+    if (codec === 'prores') hasHW = !!hwInfo.prores_videotoolbox;
+    if (codec === 'av1') hasHW = false;
 
     if (hasHW) {
       const indicator = document.createElement('span');
@@ -204,7 +200,7 @@ function createResolutionSelector() {
   const select = document.createElement('select');
   select.id = 'resolution-select';
   select.className =
-    'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition-all appearance-none cursor-pointer';
+    'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all appearance-none cursor-pointer';
 
   const options = [
     { value: 'original', label: 'Original' },
@@ -412,6 +408,18 @@ export function updateEstimation() {
   const pctStr = `${sign}${Math.round(pctChange)}%`;
 
   estimateEl.textContent = `Estimated output: ~${formatBytes(Math.round(estimatedSize))} (${pctStr})`;
+
+  // Add encoding speed estimate
+  let speedNote = '';
+  if (currentCodec === 'av1') {
+    speedNote = ' | AV1 is slow (~0.5x realtime)';
+  } else if (currentScale === 'original' && file.probeData?.height >= 2160) {
+    const isHW = isHWAvailableClient(currentCodec);
+    speedNote = isHW ? ' | 4K HW encode (~3-5x realtime)' : ' | 4K SW encode (~0.5-1x realtime)';
+  }
+  if (speedNote) {
+    estimateEl.textContent += speedNote;
+  }
 
   // Color based on savings
   if (pctChange <= -20) {

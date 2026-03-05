@@ -1,5 +1,43 @@
 # Changelog — 2026-02-24
 
+## [1.1.0] — 2026-02-24 — MetaClean + Stitch + Brutalist Theme
+
+### Added
+- **MetaClean tab**: Strip Meta AI metadata from photos/videos (HEIC, MOV, MP4)
+  - ExifTool backend with surgical tag removal (never `-all=`)
+  - Attribution mode: removes Meta/Ray-Ban branded tags
+  - Privacy mode: also removes UUID, SerialNumber, SubSecTime, Description
+  - Per-file result cards showing removed tags with old values + download
+- **Stitch tab**: Drag-and-drop video concatenation
+  - SortableJS clip reordering with drag handles
+  - Auto-detect lossless path (same codec/res/fps → `-c copy` concat)
+  - Re-encode path with filter_complex scale normalization
+  - Optional compress-after-stitch with preset/codec/format selectors
+  - Real-time progress via WebSocket
+- **Brutalist theme**: Complete CSS rewrite from glassmorphism
+  - Dark: #0d0d0d backgrounds, #00ff87 primary accent, #ff3366 secondary, #00d4ff tertiary
+  - Light: #f2f2f2 backgrounds, #00994d primary, #cc0044 secondary, #0088aa tertiary
+  - 4px border-radius, 2px solid borders, hard offset shadows (4px 4px 0)
+  - Monospace headings (SF Mono, Fira Code, JetBrains Mono)
+  - Removed all backdrop-filter/blur for solid backgrounds
+- **Tab navigation**: 3-tab UI (Compress / Stitch / MetaClean)
+- **Download endpoint**: GET /api/download with Content-Disposition attachment
+- **Download button** on completed file cards in all tabs
+- **Encoding speed estimate** in compression settings (AV1/4K warnings)
+
+### Fixed
+- **Bug 0a**: HW badge now checks `h264_videotoolbox || hevc_videotoolbox || prores_videotoolbox` instead of nonexistent `hwInfo.videotoolbox`
+- **Bug 0b**: Probe bitrate fallback `(fileSize * 8) / duration` when container doesn't store `format.bit_rate`
+- **Bug 0b**: Max preset capped at source bitrate to prevent output larger than input
+- Hardcoded inline colors in filemanager.js replaced with CSS variables
+
+### Architecture
+- Backend: +lib/exiftool.js, +lib/stitch.js, server.js (5 new routes)
+- Frontend: +public/js/tabs.js, +public/js/metaclean.js, +public/js/stitch.js
+- Modified: styles.css, index.html, app.js, compression.js, filemanager.js, progress.js, eslint.config.js
+
+---
+
 ## [1.0.0] — 2026-02-24 — Initial Release
 
 ### Added

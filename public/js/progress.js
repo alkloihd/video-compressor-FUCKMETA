@@ -4,6 +4,7 @@
 
 import { appState, showNotification, updateCompressButton } from './app.js';
 import { updateJobStatus, renderFiles } from './filemanager.js';
+import { updateStitchProgress } from './stitch.js';
 
 let ws = null;
 let reconnectTimer = null;
@@ -39,6 +40,8 @@ function handleMessage(data) {
           fps: job.fps,
         });
       }
+      // Forward to stitch progress handler
+      updateStitchProgress(data.jobId, data);
       break;
     }
 
@@ -69,6 +72,8 @@ function handleMessage(data) {
         updateCompressButton();
         renderFiles();
       }
+      // Forward to stitch progress handler
+      updateStitchProgress(data.jobId, data);
       break;
     }
 
@@ -95,6 +100,8 @@ function handleMessage(data) {
         updateCompressButton();
         renderFiles();
       }
+      // Forward to stitch progress handler
+      updateStitchProgress(data.jobId, data);
       break;
     }
 
@@ -116,6 +123,11 @@ function handleMessage(data) {
       renderFiles();
       break;
     }
+
+    case 'metaclean-complete':
+    case 'metaclean-error':
+      // Handled inline by metaclean.js via fetch response
+      break;
 
     default:
       break;

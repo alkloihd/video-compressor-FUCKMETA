@@ -5,6 +5,7 @@
  * application-controlled SVG icons. No user-generated content is injected.
  */
 
+import { initTabs } from './tabs.js';
 import { initDragDrop } from './dragdrop.js';
 import { initPlayer, loadVideo, destroyPlayer } from './player.js';
 import { initTrim, setDuration, getTrimSettings, resetTrim } from './trim.js';
@@ -17,6 +18,8 @@ import {
 } from './compression.js';
 import { initProgress } from './progress.js';
 import { initFileManager, renderFiles, formatBytes, formatDuration } from './filemanager.js';
+import { initMetaClean } from './metaclean.js';
+import { initStitch } from './stitch.js';
 
 // ─── Application State ───────────────────────────────────────────
 export const appState = {
@@ -370,6 +373,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     appState.hwInfo = null;
   }
 
+  // Initialize tab navigation
+  initTabs();
+
   // Initialize all modules
   initDragDrop();
   initPlayer();
@@ -378,6 +384,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initCompression(appState.hwInfo);
   initProgress();
   initFileManager();
+  initMetaClean();
+  initStitch();
 
   // Wire clear-all button
   const clearBtn = document.getElementById('clear-queue-btn');

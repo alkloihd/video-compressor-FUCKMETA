@@ -30,6 +30,7 @@ export default [
         MessageEvent: 'readonly',
         CloseEvent: 'readonly',
         Plyr: 'readonly',
+        Sortable: 'readonly',
         tailwind: 'readonly',
         localStorage: 'readonly',
         matchMedia: 'readonly',
