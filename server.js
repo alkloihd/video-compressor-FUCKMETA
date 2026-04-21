@@ -4,12 +4,13 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join, basename, extname, resolve } from 'path';
 import { existsSync, createReadStream, statSync, renameSync } from 'fs';
-import { mkdir, stat } from 'fs/promises';
-import { tmpdir } from 'os';
+import { mkdir, stat, unlink, readdir } from 'fs/promises';
+import { tmpdir, homedir } from 'os';
 import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
 import { detectHWAccel } from './lib/hwaccel.js';
 import { probe } from './lib/probe.js';
-import { buildCommand } from './lib/ffmpeg.js';
+import { buildCommand, buildTwoPassCommands } from './lib/ffmpeg.js';
 import { JobQueue } from './lib/jobQueue.js';
 import { spawn } from 'child_process';
 import {
@@ -34,10 +35,48 @@ const FFMPEG_PATH = '/opt/homebrew/bin/ffmpeg';
 
 await mkdir(UPLOAD_DIR, { recursive: true });
 
-// Path safety: only allow access to uploaded files and temp dirs
+// Clean stale uploads from previous sessions on startup
+async function cleanUploadDir() {
+  try {
+    const files = await readdir(UPLOAD_DIR);
+    let cleaned = 0;
+    for (const f of files) {
+      try {
+        await unlink(join(UPLOAD_DIR, f));
+        cleaned++;
+      } catch {
+        /* skip locked files */
+      }
+    }
+    if (cleaned > 0) console.log(`  Cleaned ${cleaned} stale temp file(s) from previous session`);
+  } catch {
+    /* dir may not exist yet */
+  }
+}
+await cleanUploadDir();
+
+// Clean up a specific temp upload after compression completes
+async function cleanTempUpload(inputPath) {
+  const resolved = resolve(inputPath);
+  if (!resolved.startsWith(resolve(UPLOAD_DIR))) return; // only clean uploads, not local paths
+  try {
+    await unlink(resolved);
+  } catch {
+    /* already gone */
+  }
+}
+
+// Output directory for uploaded files (instead of temp dir)
+const OUTPUT_DIR = join(homedir(), 'Movies', 'Video Compressor Output');
+await mkdir(OUTPUT_DIR, { recursive: true });
+
+// Path safety: allow user home, /Volumes, upload dir, and temp
 function isSafePath(filePath) {
   const resolved = resolve(filePath);
-  const allowedRoots = [resolve(UPLOAD_DIR), resolve(tmpdir())];
+  const blocked = ['/System', '/Library', '/usr', '/bin', '/sbin', '/private/etc'];
+  if (blocked.some((b) => resolved.startsWith(b))) return false;
+  const home = resolve(homedir());
+  const allowedRoots = [home, '/Volumes', resolve(UPLOAD_DIR), resolve(tmpdir())];
   return allowedRoots.some((root) => resolved.startsWith(root + '/') || resolved === root);
 }
 
@@ -83,12 +122,14 @@ function broadcast(data) {
   }
 }
 
-jobQueue.on('progress', (data) => broadcast({ type: 'progress', jobId: data.id, ...data }));
-jobQueue.on('complete', (data) =>
-  broadcast({ type: 'complete', jobId: data.id, outputSize: data.compressedSize, ...data }),
-);
+jobQueue.on('progress', (data) => broadcast({ ...data, type: 'progress', jobId: data.id }));
+jobQueue.on('complete', (data) => {
+  broadcast({ ...data, type: 'complete', jobId: data.id, outputSize: data.compressedSize });
+  // Clean up temp upload after successful compression
+  if (data.inputPath) cleanTempUpload(data.inputPath);
+});
 jobQueue.on('error', (data) =>
-  broadcast({ type: 'error', jobId: data.id, error: data.message, ...data }),
+  broadcast({ ...data, type: 'error', jobId: data.id, error: data.message }),
 );
 
 app.use(express.json({ limit: '1mb' }));
@@ -215,7 +256,23 @@ app.get('/api/thumbnail', (req, res) => {
 
 // Compress
 app.post('/api/compress', async (req, res) => {
-  const { files, preset, codec, format, trim, crop, scale, crf, speed } = req.body;
+  const {
+    files,
+    preset,
+    codec,
+    format,
+    trim,
+    crop,
+    scale,
+    crf,
+    speed,
+    audioBitrate = 192,
+    audioCodec = 'aac',
+    fps = 'original',
+    twoPass = false,
+    preserveMetadata = true,
+    fastStart = true,
+  } = req.body;
   if (!files || !Array.isArray(files) || files.length === 0)
     return res.status(400).json({ error: 'Missing required field: files' });
   if (!preset) return res.status(400).json({ error: 'Missing required field: preset' });
@@ -236,14 +293,18 @@ app.post('/api/compress', async (req, res) => {
       return res.status(404).json({ error: `File not found: ${inputPath}` });
 
     const inputDir = dirname(inputPath);
-    const inputName = basename(inputPath, extname(inputPath));
+    const isUploadedFile = resolve(inputDir).startsWith(resolve(UPLOAD_DIR));
+    const outputDir = isUploadedFile ? OUTPUT_DIR : inputDir;
+    const inputName = isUploadedFile
+      ? basename(file.name || inputPath, extname(file.name || inputPath))
+      : basename(inputPath, extname(inputPath));
     const outputExt = format === 'mkv' ? '.mkv' : format === 'mov' ? '.mov' : '.mp4';
     let outputName = `${inputName}_COMP${outputExt}`;
-    let outputPath = join(inputDir, outputName);
+    let outputPath = join(outputDir, outputName);
     let counter = 2;
     while (existsSync(outputPath)) {
       outputName = `${inputName}_COMP_${counter}${outputExt}`;
-      outputPath = join(inputDir, outputName);
+      outputPath = join(outputDir, outputName);
       counter++;
     }
 
@@ -254,7 +315,7 @@ app.post('/api/compress', async (req, res) => {
       return res.status(500).json({ error: `Failed to probe: ${inputPath}: ${err.message}` });
     }
 
-    const ffmpegArgs = buildCommand({
+    const buildOptions = {
       inputPath,
       outputPath,
       preset,
@@ -265,9 +326,38 @@ app.post('/api/compress', async (req, res) => {
       crop: crop || null,
       scale: scale || 'original',
       sourceBitrate: metadata.bitrate || 0,
+      sourceHeight: metadata.height || null,
+      sourceWidth: metadata.width || null,
       crf: crf !== undefined ? crf : null,
       speed: speed || null,
-    });
+      audioBitrate: Number(audioBitrate) || 192,
+      audioCodec: audioCodec || 'aac',
+      fps: fps || 'original',
+      twoPass: !!twoPass,
+      preserveMetadata: preserveMetadata !== false,
+      fastStart: fastStart !== false,
+    };
+
+    // Determine if two-pass is viable (software encoders only)
+    const hwAvailable =
+      (codec === 'h264' && hwaccelCapabilities?.h264_videotoolbox) ||
+      (codec === 'h265' && hwaccelCapabilities?.hevc_videotoolbox) ||
+      (codec === 'prores' && hwaccelCapabilities?.prores_videotoolbox);
+    const useTwoPass = twoPass && !hwAvailable && codec !== 'prores';
+
+    let ffmpegArgs;
+    let pass1Args = null;
+    let passlogFile = null;
+
+    if (useTwoPass) {
+      passlogFile = join(tmpdir(), `ffmpeg2pass-${uuidv4()}`);
+      const twoPassCmds = buildTwoPassCommands(buildOptions, passlogFile);
+      pass1Args = twoPassCmds.pass1Args;
+      ffmpegArgs = twoPassCmds.pass2Args;
+    } else {
+      ffmpegArgs = buildCommand(buildOptions);
+    }
+
     const fileStat = await stat(inputPath);
 
     const job = jobQueue.addJob({
@@ -277,9 +367,26 @@ app.post('/api/compress', async (req, res) => {
       codec,
       format,
       ffmpegArgs,
+      pass1Args,
+      passlogFile,
       duration: metadata.duration,
       originalSize: fileStat.size,
     });
+
+    // Clean up passlog files when the job completes or errors
+    if (passlogFile) {
+      const cleanupPasslog = async () => {
+        for (const suffix of ['', '-0.log', '-0.log.mbtree']) {
+          try {
+            await unlink(`${passlogFile}${suffix}`);
+          } catch (_) {
+            /* file may not exist */
+          }
+        }
+      };
+      jobQueue.once(`complete:${job.id}`, cleanupPasslog);
+      jobQueue.once(`error:${job.id}`, cleanupPasslog);
+    }
 
     jobs.push({
       id: job.id,
@@ -417,23 +524,21 @@ app.post('/api/metaclean', async (req, res) => {
 });
 
 // Probe clips for stitch compatibility
-app.get('/api/stitch/probe', async (req, res) => {
-  const paths = req.query.paths;
-  if (!paths) return res.status(400).json({ error: "Query parameter 'paths' is required" });
+app.post('/api/stitch/probe', async (req, res) => {
+  const { paths } = req.body;
+  if (!paths || !Array.isArray(paths) || paths.length === 0) {
+    return res.status(400).json({ error: "Body field 'paths' (array) is required" });
+  }
 
-  const clipPaths = paths
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (clipPaths.length < 2) {
+  if (paths.length < 2) {
     return res.status(400).json({ error: 'At least 2 clip paths are required' });
   }
 
-  for (const p of clipPaths) {
+  for (const p of paths) {
     if (!isSafePath(p)) return res.status(403).json({ error: 'Access denied' });
   }
 
-  const clips = clipPaths.map((path) => ({ path, name: basename(path) }));
+  const clips = paths.map((path) => ({ path, name: basename(path) }));
 
   try {
     const result = await probeClips(clips);
@@ -538,7 +643,7 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Video Compressor ready at http://localhost:${PORT}\n`);
   console.log(
     `  Hardware acceleration: ${hwaccelCapabilities.h264_videotoolbox ? 'VideoToolbox' : 'Software only'}`,

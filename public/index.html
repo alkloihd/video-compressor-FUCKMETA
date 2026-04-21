@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,35 +9,19 @@
     <link rel="stylesheet" href="/css/styles.css" />
     <script>
       tailwind.config = {
-        darkMode: 'class',
+        darkMode: ['selector', '[data-theme="dark"]'],
         theme: {
           extend: {
             colors: {
-              surface: { 950: '#0d0d0d', 900: '#141414', 800: '#1c1c1c', 700: '#262626' },
+              surface: { 950: '#0a0a1a', 900: '#0f0f23', 800: '#1a1a35', 700: '#222244' },
             },
           },
         },
       };
     </script>
-    <!-- Inline theme application to prevent flash of wrong theme -->
+    <!-- Force dark mode -->
     <script>
-      (function () {
-        var STORAGE_KEY = 'theme';
-        var stored = null;
-        try {
-          stored = localStorage.getItem(STORAGE_KEY);
-        } catch (e) {}
-        var choice =
-          stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
-        var effective;
-        if (choice === 'light') effective = 'light';
-        else if (choice === 'dark') effective = 'dark';
-        else
-          effective = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        document.documentElement.setAttribute('data-theme', effective);
-        if (effective === 'dark') document.documentElement.classList.add('dark');
-        else document.documentElement.classList.remove('dark');
-      })();
+      document.documentElement.setAttribute('data-theme', 'dark');
     </script>
   </head>
   <body class="min-h-screen antialiased">
@@ -70,57 +54,6 @@
           </h1>
         </div>
         <div class="flex items-center gap-3">
-          <!-- Theme Toggle -->
-          <div class="theme-toggle" role="group" aria-label="Theme selection">
-            <button
-              class="theme-toggle-btn"
-              data-theme-choice="light"
-              aria-pressed="false"
-              aria-label="Light theme"
-              title="Light"
-            >
-              <!-- Sun icon -->
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-                />
-              </svg>
-            </button>
-            <button
-              class="theme-toggle-btn"
-              data-theme-choice="system"
-              aria-pressed="false"
-              aria-label="System theme"
-              title="System"
-            >
-              <!-- Monitor icon -->
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z"
-                />
-              </svg>
-            </button>
-            <button
-              class="theme-toggle-btn"
-              data-theme-choice="dark"
-              aria-pressed="false"
-              aria-label="Dark theme"
-              title="Dark"
-            >
-              <!-- Moon icon -->
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
-                />
-              </svg>
-            </button>
-          </div>
           <!-- HW Badge -->
           <div id="hw-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs">
             <span class="relative flex h-2 w-2">
@@ -177,9 +110,28 @@
               />
             </svg>
           </div>
-          <p class="text-lg font-medium themed-drop-primary mb-1">
-            Drop video files here or click to browse
-          </p>
+          <p class="text-lg font-medium themed-drop-primary mb-1">Drop video files here</p>
+          <label
+            for="file-input"
+            class="mt-2 mb-2 inline-flex items-center gap-2 px-6 py-3 rounded-full cursor-pointer text-sm font-semibold transition-all duration-200"
+            style="
+              background: var(--accent-green, #22c55e);
+              color: #000;
+              box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+            "
+            onclick="event.stopPropagation()"
+          >
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              stroke-width="2"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Browse Files
+          </label>
           <p class="text-sm themed-drop-secondary">
             Supports MP4, MKV, AVI, MOV, WebM, WMV, FLV, TS, M4V and more
           </p>
@@ -225,97 +177,11 @@
 
         <!-- SETTINGS + PREVIEW -->
         <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          <!-- SETTINGS PANEL -->
+          <!-- SETTINGS PANEL (dynamically populated by compression.js) -->
           <div id="settings-panel" class="lg:col-span-2 space-y-5">
-            <!-- Quality Preset -->
-            <div class="glass-card p-5 space-y-3">
-              <h3 class="text-sm font-semibold themed-heading uppercase tracking-wider">
-                Quality Preset
-              </h3>
-              <div class="grid grid-cols-2 gap-2" id="quality-presets">
-                <button class="preset-btn active" data-preset="balanced">
-                  <span class="block text-sm font-medium">Balanced</span
-                  ><span class="block text-xs themed-text-muted">Good quality & size</span>
-                </button>
-                <button class="preset-btn" data-preset="max">
-                  <span class="block text-sm font-medium">Max Quality</span
-                  ><span class="block text-xs themed-text-muted">Visually lossless</span>
-                </button>
-                <button class="preset-btn" data-preset="small">
-                  <span class="block text-sm font-medium">Small File</span
-                  ><span class="block text-xs themed-text-muted">Maximum compression</span>
-                </button>
-                <button class="preset-btn" data-preset="streaming">
-                  <span class="block text-sm font-medium">Streaming</span
-                  ><span class="block text-xs themed-text-muted">Optimized for web</span>
-                </button>
-                <button class="preset-btn" data-preset="custom">
-                  <span class="block text-sm font-medium">Custom</span
-                  ><span class="block text-xs themed-text-muted">Full control</span>
-                </button>
-              </div>
-
-              <!-- Custom Quality Panel (visible when Custom preset selected) -->
-              <div id="custom-quality-panel" class="hidden mt-3 space-y-3">
-                <!-- CRF/Bitrate Slider -->
-                <div>
-                  <label class="text-xs themed-text-muted">Quality (CRF / Bitrate)</label>
-                  <input
-                    type="range"
-                    id="custom-crf"
-                    min="0"
-                    max="51"
-                    value="23"
-                    class="w-full mt-1"
-                    style="accent-color: var(--accent)"
-                  />
-                  <div class="flex justify-between text-xs themed-text-muted">
-                    <span>Best Quality (larger)</span>
-                    <span id="custom-crf-value">CRF 23</span>
-                    <span>Smallest (lower quality)</span>
-                  </div>
-                </div>
-
-                <!-- Encoding Speed -->
-                <div>
-                  <label class="text-xs themed-text-muted">Encoding Speed</label>
-                  <div id="speed-selector" class="flex flex-wrap gap-1.5 mt-1">
-                    <button class="preset-btn text-xs py-1 px-2" data-speed="ultrafast">
-                      Ultrafast
-                    </button>
-                    <button class="preset-btn text-xs py-1 px-2" data-speed="fast">Fast</button>
-                    <button class="preset-btn text-xs py-1 px-2 active" data-speed="medium">
-                      Medium
-                    </button>
-                    <button class="preset-btn text-xs py-1 px-2" data-speed="slow">Slow</button>
-                    <button class="preset-btn text-xs py-1 px-2" data-speed="veryslow">
-                      Veryslow
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Codec -->
-            <div class="glass-card p-5 space-y-3">
-              <h3 class="text-sm font-semibold themed-heading uppercase tracking-wider">Codec</h3>
-              <div class="flex flex-wrap gap-2" id="codec-selector">
-                <button class="preset-btn" data-codec="h264">H.264</button>
-                <button class="preset-btn active" data-codec="h265">H.265 (HEVC)</button>
-                <button class="preset-btn" data-codec="av1">AV1</button>
-                <button class="preset-btn" data-codec="prores">ProRes</button>
-              </div>
-            </div>
-
-            <!-- Format -->
-            <div class="glass-card p-5 space-y-3">
-              <h3 class="text-sm font-semibold themed-heading uppercase tracking-wider">Format</h3>
-              <div class="flex flex-wrap gap-2" id="format-selector">
-                <button class="preset-btn active" data-format="mp4">MP4</button>
-                <button class="preset-btn" data-format="mov">MOV</button>
-                <button class="preset-btn" data-format="mkv">MKV</button>
-              </div>
-            </div>
+            <!-- Matrix + controls rendered here by compression.js -->
+            <div id="matrix-container"></div>
+            <div id="compression-controls"></div>
 
             <!-- Trim -->
             <div id="trim-section" class="glass-card p-5 space-y-3">
@@ -393,16 +259,6 @@
               </svg>
               Compress All
             </button>
-
-            <!-- Tradeoff Information -->
-            <details id="tradeoff-info" class="mt-4">
-              <summary class="text-xs themed-text-muted cursor-pointer hover:opacity-80">
-                What will change? (quality vs size tradeoffs)
-              </summary>
-              <div id="tradeoff-content" class="mt-2 text-xs space-y-2 themed-text-muted">
-                <!-- Dynamically populated by compression.js -->
-              </div>
-            </details>
           </div>
 
           <!-- VIDEO PREVIEW -->
@@ -696,10 +552,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
     <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
-    <script type="module">
-      import { initTheme } from '/js/theme.js';
-      initTheme();
-    </script>
     <script type="module" src="/js/app.js"></script>
   </body>
 </html>

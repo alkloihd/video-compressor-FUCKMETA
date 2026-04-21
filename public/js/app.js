@@ -16,7 +16,7 @@ import {
   updateResolutionOptions,
   updateEstimation,
 } from './compression.js';
-import { initProgress } from './progress.js';
+import { initProgress, showProgressOverlay } from './progress.js';
 import { initFileManager, renderFiles, formatBytes, formatDuration } from './filemanager.js';
 import { initMetaClean } from './metaclean.js';
 import { initStitch } from './stitch.js';
@@ -246,10 +246,16 @@ export async function compressAll() {
   const compressBtn = document.getElementById('compress-btn');
   compressBtn.disabled = true;
 
+  // Set all files to queued first
   for (const file of pendingFiles) {
     file.status = 'queued';
-    renderFiles();
+  }
+  renderFiles();
 
+  // Now show overlay (files are queued so they'll appear)
+  showProgressOverlay();
+
+  for (const file of pendingFiles) {
     try {
       const body = {
         files: [{ path: file.serverPath, name: file.name }],
@@ -257,6 +263,12 @@ export async function compressAll() {
         codec: settings.codec,
         format: settings.format,
         scale: file.scale || settings.scale,
+        audioBitrate: settings.audioBitrate,
+        audioCodec: settings.audioCodec,
+        fps: settings.fps,
+        twoPass: settings.twoPass,
+        preserveMetadata: settings.preserveMetadata,
+        fastStart: settings.fastStart,
       };
 
       // Pass custom preset parameters when applicable
